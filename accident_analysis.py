@@ -1,32 +1,36 @@
+import sys
 import pandas as pd
-import numpy as np
 import seaborn as sns
 import matplotlib.pyplot as plt
 import kagglehub
-import os
 import shutil
-from docx import Document
-from docx.shared import Inches
+import kagglehub
+from statprint import StatPrint # type: ignore
+import time 
 
-# Download dataset
+start_time = time.time()
+
+# Define paths
+source_path = None
+dataset_url = "sobhanmoosavi/us-accidents"
+destination_path = "/Users/nolanleavitt/Desktop/python/us_accidents/data/us_accidents.csv"
+cache_path = '/Users/nolanleavitt/.cache/kagglehub/datasets/sobhanmoosavi/us-accidents/versions/13/US_Accidents_March23.csv'
+
+# Download the dataset
 try:
-    source_path = kagglehub.dataset_download("sobhanmoosavi/us-accidents")
+    source_path = kagglehub.dataset_download(dataset_url)
+    print(f"Dataset downloaded to: {source_path}")
 
-    print(f"Dataset is located here: {source_path}")
-
-    path = '/Users/nolanleavitt/.cache/kagglehub/datasets/sobhanmoosavi/us-accidents/versions/13/US_Accidents_March23.csv'
-    destination_path = "/Users/nolanleavitt/Desktop/python/us_accidents/data/us_accidents.csv"
-
-        # try to move downloaded data
+    # Try moving the downloaded file to the desired destination
     try:
-        shutil.move(path, destination_path)
+        shutil.move(cache_path, destination_path)
         print(f"File successfully moved to: {destination_path}")
+    except FileExistsError:
+        print(f"File already exists at {destination_path}")
 
-    except:
-        print('File already exists')
+except Exception as e:
+    print(f"Error during dataset download or file movement: {e}")
 
-except:
-    pass
 
 #Specify columns to keep
 columns_to_keep = ['ID', 'Source', 'Severity', 'Start_Time', 'End_Time',
@@ -36,7 +40,7 @@ columns_to_keep = ['ID', 'Source', 'Severity', 'Start_Time', 'End_Time',
 
 #chunk_size = 10000
 # load dataset into dataframe
-df = pd.read_csv("us_accidents.csv", nrows=100000, usecols=columns_to_keep)
+df = pd.read_csv("us_accidents.csv", usecols=columns_to_keep)
 
 #######################################   Data Cleaning   ############################################
 
@@ -58,41 +62,16 @@ mean_temp = df['Temperature(F)'].mean()
 df['Temperature(F)'] = df['Temperature(F)'].fillna(mean_temp)
 
 # Create year/month
-df['Start_Time'] = pd.to_datetime(df['Start_Time'])
-df['End_Time'] = pd.to_datetime(df['End_Time'])
+df['Start_Time'] = pd.to_datetime(df['Start_Time'], format='mixed')
+df['End_Time'] = pd.to_datetime(df['End_Time'], format='mixed')
 
 df['Year'] = df['Start_Time'].dt.year
 df['Month'] = df['Start_Time'].dt.month
 
 # Create full time of incident & day of incident
-df['full_incident_time'] = df['End_Time'] - df['Start_Time'] 
+df['Time_of_Incident'] = df['End_Time'] - df['Start_Time'] 
 df['Day_of_Incident'] = df['Start_Time'].dt.dayofweek
 
-
-#############################   Create visuals for analysis   #############################
-
-# weather over severity
-def weather_condition_chart(df):
-    plt.figure(figsize=(10,6))
-    sns.countplot(data=df, x='Weather_Condition', hue='Severity', palette='viridis')
-    plt.xticks(rotation=15)
-    plt.title("Accident Severity by Weather Condition")
-    plt.show()
-
-# incidents by month
-def incidents_by_month(df):
-    plt.figure(figsize=(10,6))
-    sns.countplot(data=df, x='Month', hue='Severity', palette='viridis')
-    plt.title("Accidents by month")
-    plt.show()
-
-# incidents by temperature
-def incidents_by_temperature(df):
-    plt.figure(figsize=(10,6))
-    sns.histplot(data=df, x='Temperature(F)', hue='Severity', palette='husl')
-    plt.xticks(rotation=15)
-    plt.title("Accident Severity by Weather Condition")
-    plt.show()
 
 #############################   Create Bins   #############################
 
@@ -199,13 +178,80 @@ state_to_region = {
 df['Weather_Condition'] = df['Weather_Condition'].map(weather_condition)
 
 df['Region'] = df['State'].map(state_to_region)
-print(df['Region'].value_counts())
+
+df.to_csv('/Users/nolanleavitt/Desktop/python/us_accidents/data/cleaned_us_accidents.csv', index=False)
+print("Cleaned dataset saved as 'cleaned_us_accidents.csv'")
+
+#############################   Create visuals for analysis   #############################
+
+# weather over severity
+def weather_condition_chart(df):
+    # Generate the plot
+    plt.figure(figsize=(10, 6))
+    sns.countplot(data=df, x='Weather_Condition', hue='Severity', palette='viridis')
+    plt.xticks(rotation=15)
+    plt.title("Accident Severity by Weather Condition")
+    
+    # Return the figure object 
+    return plt
+
+weather_graph = weather_condition_chart(df)
 
 
+# severity by region
+def incidents_by_month(df):
+    plt.figure(figsize=(10, 6))
+    sns.countplot(data=df, x='Region', hue='Severity', palette='viridis')
+    plt.xticks(rotation=15)
+    plt.title("Severity of Incident by Region")
+    
+    # Return the figure object
+    return plt
+region_graph = incidents_by_month(df)
+
+    
 #################################   Generate Descriptive Stats    ######################################
+print(df.info())
+print(df.describe())
+print(get_missing_counts(df))
+
+# Frequency table of region
+region_frequency = df[['Region']].value_counts()
+
+# frequency table of severity
+severity_frequency = df['Severity'].value_counts()
+
+# frequency table of weather condition
+weather_frequency = df['Weather_Condition'].value_counts()
+
+#dataframe for descriptive stats by region
+df_region = df.groupby('Region').agg({
+    'Temperature(F)': 'mean',
+    'Time_of_Incident': 'mean',
+    'Day_of_inciden': 'count'
+})
+df_region[['Temperature(F)', 'Time_of_Incident']] = df_region[['Temperature(F)', 'Time_of_Incident']].round(2)
 
 
+#################################### generate summary report #################################################
+graph_name = weather_condition_chart(df)
 
+report = StatPrint(filename='test3', doc_type='word', title = 'US Car Accidents')
 
+report.add_heading("Frequency of accidents by Region")
+report.add_table(region_frequency)
+report.add_graph(region_graph)
+report.add_heading("Average Temperature, Total Incident Time, and Day of Incident Frequency")
+report.add_table(df_region)
 
+report.add_heading("Table of Weather Conditions")
+report.add_table(weather_frequency)
 
+report.add_graph(weather_graph)
+
+report.generate_report()
+
+# print out total time of report
+end_time = time.time()
+elapsed_time = end_time - start_time
+print(f"Elapsed time: {elapsed_time:.2f} seconds")
